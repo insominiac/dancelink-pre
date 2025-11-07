@@ -64,6 +64,7 @@ export default function EventsClient({
   const [isLoading, setIsLoading] = useState(!initialEvents?.length || !initialPageContent)
   const [filters, setFilters] = useState({ eventType: 'all', month: 'all', priceRange: 'all' })
   const [searchTerm, setSearchTerm] = useState('')
+  const [hasFetchedAllEvents, setHasFetchedAllEvents] = useState(false)
 
   useEffect(() => {
     setIsMounted(true)
@@ -76,36 +77,58 @@ export default function EventsClient({
     }
   }, [initialLang, i18n])
 
-  // Only fetch if no initial server data
+  // Lazy load all events when component mounts (if we only have featured events)
   useEffect(() => {
-    if (initialEvents?.length && initialPageContent) {
-      setIsLoading(false)
-      return
-    }
-    const run = async () => {
-      setIsLoading(true)
-      try {
-        const [evRes, pcRes] = await Promise.all([
-          fetch(apiUrl('public/events'), { cache: 'no-store' }),
-          fetch(apiUrl('public/content/events'), { cache: 'no-store' })
-        ])
-        if (evRes.ok) {
-          const data = await evRes.json()
-          setEvents(data.events)
-          setFilteredEvents(data.events)
+    // Only fetch all events if we don't have them yet and we only have featured events
+    if (!hasFetchedAllEvents && initialEvents.length > 0 && initialEvents.every(e => e.isFeatured)) {
+      const fetchAllEvents = async () => {
+        setIsLoading(true)
+        try {
+          const evRes = await fetch(apiUrl('public/events'), { cache: 'no-store' })
+          if (evRes.ok) {
+            const data = await evRes.json()
+            setEvents(data.events)
+            setFilteredEvents(data.events)
+            setHasFetchedAllEvents(true)
+          }
+        } catch (e) {
+          console.error('Error fetching all events:', e)
+        } finally {
+          setIsLoading(false)
         }
-        if (pcRes.ok) {
-          const content = await pcRes.json()
-          setPageContent(content)
-        }
-      } catch (e) {
-        // ignore
-      } finally {
-        setIsLoading(false)
       }
+      
+      fetchAllEvents()
     }
-    run()
-  }, [initialEvents, initialPageContent])
+    // If we don't have any initial events, fetch all events
+    else if (!hasFetchedAllEvents && initialEvents.length === 0) {
+      const fetchAllEvents = async () => {
+        setIsLoading(true)
+        try {
+          const [evRes, pcRes] = await Promise.all([
+            fetch(apiUrl('public/events'), { cache: 'no-store' }),
+            fetch(apiUrl('public/content/events'), { cache: 'no-store' })
+          ])
+          if (evRes.ok) {
+            const data = await evRes.json()
+            setEvents(data.events)
+            setFilteredEvents(data.events)
+          }
+          if (pcRes.ok) {
+            const content = await pcRes.json()
+            setPageContent(content)
+          }
+          setHasFetchedAllEvents(true)
+        } catch (e) {
+          console.error('Error fetching events and content:', e)
+        } finally {
+          setIsLoading(false)
+        }
+      }
+      
+      fetchAllEvents()
+    }
+  }, [hasFetchedAllEvents, initialEvents])
 
   useEffect(() => {
     let filtered = [...events]
@@ -139,16 +162,14 @@ export default function EventsClient({
 
   if (isLoading || !pageContent) {
     return (
-      <div className="dance-container">
-        <div className="flex justify-center items-center h-64">
-          <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{borderBottomColor: 'var(--primary-gold)'}}></div>
-        </div>
+      <div className="min-h-[calc(100vh-200px)] flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2" style={{borderBottomColor: 'var(--primary-gold)'}}></div>
       </div>
     )
   }
 
   // Translate hero title client-side for languages without static resources
-  const heroTitleTranslated = useAutoTranslate(pageContent?.heroTitle || '')
+  const heroTitleTranslated = useAutoTranslate(pageContent?.heroTitle)
   const heroTitleParts = (heroTitleTranslated || '').trim().split(' ')
   const heroTitleLast = heroTitleParts.pop() || ''
   const heroTitleLeading = heroTitleParts.join(' ')
@@ -186,7 +207,7 @@ export default function EventsClient({
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-6">
-            {pageContent.heroFeatures.map((feature, index) => (
+            {pageContent.heroFeatures && pageContent.heroFeatures.map((feature, index) => (
               <React.Fragment key={index}>
                 <div className="flex items-center">
                   <div className="flex items-center text-white/90">
@@ -194,7 +215,7 @@ export default function EventsClient({
                     <span className="font-medium"><TranslatedText text={feature.text} /></span>
                   </div>
                 </div>
-                {index < pageContent.heroFeatures.length - 1 && (
+                {index < (pageContent.heroFeatures?.length || 0) - 1 && (
                   <div className="hidden sm:block text-white/60 mx-4">•</div>
                 )}
               </React.Fragment>
@@ -271,7 +292,7 @@ export default function EventsClient({
                           </span>
                         </div>
                       </div>
-                      <div className="flex items-center justify-between">
+                      <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
                         <div>
                           <span className="text-3xl font-bold" style={{color: 'var(--primary-dark)'}}>${event.price}</span>
                           <span className="text-sm ml-1" style={{color: 'var(--neutral-gray)'}}>/person</span>
@@ -468,7 +489,7 @@ export default function EventsClient({
                 <Link href={pageContent.ctaButtons.secondary.href} className="dance-btn dance-btn-outline hover:transform hover:scale-105 hover:shadow-2xl transition-all duration-300 px-6 py-3">{pageContent.ctaButtons.secondary.text ? <TranslatedText text={pageContent.ctaButtons.secondary.text} /> : null}</Link>
               </div>
               <div className="dance-card-grid">
-                {pageContent.ctaFeatures.map((feature, index) => (
+                {pageContent.ctaFeatures && pageContent.ctaFeatures.map((feature, index) => (
                   <div key={index} className="group text-center">
                     <div className="text-4xl mb-3 group-hover:scale-110 transition-transform duration-300">{feature.icon}</div>
                     <h4 className="font-bold text-white mb-2">{feature.title}</h4>
